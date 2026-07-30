@@ -258,7 +258,11 @@ app.disable('x-powered-by');
 // Locally they are what serves the app.
 app.use(express.static(path.join(__dirname, '..', 'public'), { extensions: ['html'] }));
 
-app.get('/healthz', (_req, res) => {
+// Answers on every path that can reach this function, because a rewrite may
+// hand Express either the original URL or the destination one depending on how
+// the platform resolves it. A plain GET to the socket path lands here too,
+// which makes it a usable smoke test.
+app.get(['/healthz', '/api/healthz', '/api/server', '/api/ws'], (_req, res) => {
   res.json({ ok: true, instance: INSTANCE_ID, bus: bus.mode, online: lastCount });
 });
 
