@@ -1,37 +1,120 @@
 # nullchat
 
-An anonymous global chatroom that forgets you. One temporary handle per visit,
-no accounts, no message history, no logs. Close the tab and the identity is
-gone.
+An anonymous chatroom that forgets you. One room, open to anyone, no accounts,
+no history. You get a throwaway handle when you arrive and it stops existing
+when you close the tab.
 
-Built for native deployment on Vercel Functions: Express + `ws` for the socket,
-Upstash Redis Pub/Sub to keep every serverless instance in sync.
+**Live at [nullchat-ten.vercel.app](https://nullchat-ten.vercel.app)**
 
----
-
-## Directory structure
-
-```
-nullchat/
-├── api/
-│   └── server.js        Express + ws server, Redis Pub/Sub, presence, sanitisation
-├── public/
-│   └── index.html       Entire frontend: markup, styles, client logic
-├── .claude/
-│   └── launch.json      Local dev-server config (editor tooling only)
-├── package.json
-├── vercel.json          Routing + security headers
-├── .env.example
-└── README.md
-```
-
-Two source files do the whole job. `api/server.js` exports a raw `http.Server`,
-which is exactly what Vercel's WebSocket support expects; `public/` is served
-straight off the CDN.
+![The nullchat room](docs/chat.png)
 
 ---
 
-## Run it locally
+## What it is
+
+One global room. You are handed a random handle like `quiet_harbor_31`, you can
+change it to anything you like, and you start talking. There is no sign up, no
+password, no email, and no profile.
+
+Nothing you send is saved. Messages exist only long enough to be delivered to
+whoever is connected at that moment. Arrive five minutes late and you have
+missed the conversation permanently, because it was never written down.
+
+Refresh the page and you come back as a different person. That is not a bug in
+the session handling, it is the entire idea.
+
+![The entry screen](docs/entry.png)
+
+---
+
+## What it never keeps
+
+| | |
+| --- | --- |
+| **Messages** | Delivered and discarded. Never written to a database, a file, or a log. There is no history to read, leak, subpoena, or sell. |
+| **Accounts** | None exist. No email, no password, no profile, nothing to breach. |
+| **Your handle** | Lives in your browser tab's memory and in the RAM of whichever server is holding your connection. Close the tab and both copies are gone. |
+| **Cookies / localStorage** | Not used for identity. The site stores nothing on your device, which is why a refresh makes you a new person. |
+| **Who said what** | Not recorded anywhere. Once a message is delivered, no record connects it to you. |
+
+---
+
+## What it does store, briefly
+
+Being straight about this, because "we store nothing" is almost never fully
+true.
+
+**A presence set.** To show the online counter, each connection adds an entry
+to a Redis sorted set. The entry is an opaque id like `7f3a91c2:4d8e...`, a
+random value with no link to your handle or to you. It carries a timestamp and
+is deleted 45 seconds after the connection stops responding.
+
+**A short lived name key.** When you disconnect, your handle is held in Redis
+for up to 20 seconds under a key that expires on its own. This exists so that a
+dropped connection which immediately reconnects does not spam the room with
+"left" and "joined". It is the one place a handle touches storage, it is never
+read by anything except that check, and it deletes itself.
+
+That is the complete list.
+
+---
+
+## What this does not protect you from
+
+Equally important, and usually left out.
+
+**It is not end to end encrypted.** Traffic is encrypted in transit with TLS,
+but the server processes messages in plaintext in order to relay them. Anyone
+with access to the running server could read messages as they pass through.
+This protects you from a permanent record, not from the operator.
+
+**The host still sees connections.** nullchat logs no IP addresses. The
+platform it runs on keeps its own infrastructure logs, as every web host does.
+Anonymous here means no identity in the application, not invisibility on the
+internet.
+
+**The room is public.** Everyone connected reads everything. There are no
+private messages and no private rooms.
+
+**One tab per device is a convenience, not a control.** A second tab is blocked
+so the online count stays honest. A different browser, a private window, or
+another device is a different user, and nothing in a web page can prevent that.
+
+**There is no moderation.** No accounts and no logs also means no way to trace
+or remove anything. That tradeoff is deliberate, and it is a real one.
+
+---
+
+## How it works
+
+Express and the `ws` package, running as a Vercel Function, with Upstash Redis
+linking the instances together.
+
+**Messages** are published to a Redis Pub/Sub channel. Every server instance
+subscribes and fans each message out to the browsers connected to it. Pub/Sub
+delivers to whoever is listening right now and keeps nothing, which is what
+makes "no history" the default rather than a feature that had to be built.
+
+**The online counter** uses a Redis sorted set scored by heartbeat timestamp.
+Each instance refreshes its own connections every 15 seconds and evicts
+anything older than 45 seconds before counting. An instance that dies without
+cleaning up ages out instead of inflating the number forever.
+
+**Connections drop about every 5 minutes**, because that is the Vercel function
+duration cap. The browser reconnects with backoff and rejoins silently, and the
+"left the room" notice is held for 10 seconds so a reconnect can cancel it.
+You should never see this happen.
+
+**Input is sanitised twice.** The server strips control characters and angle
+brackets before publishing anything, and the browser builds every message node
+with `textContent`, so no user string ever reaches `innerHTML`. Doing it server
+side too means a hand written client that skips the browser entirely still
+cannot inject markup. Messages are capped at 500 characters and each connection
+is limited to 12 messages per 10 seconds.
+
+---
+
+## Run it yourself
 
 ```bash
 npm install
@@ -41,161 +124,28 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:3000>. Open a second window to talk to yourself.
+Then open <http://localhost:3000>.
 
-Without `REDIS_URL` the server starts in **single-instance mode**: an
-in-process event bus stands in for Redis Pub/Sub so the app runs with zero
-setup. It logs a warning when it does this. Everything works, but only within
-one process, which is fine locally and wrong in production.
+Without a `REDIS_URL` it starts in single instance mode, using an in process
+event bus in place of Redis so it runs with zero setup. Everything works, but
+only within one process. Fine for local development, wrong in production.
 
-> Use `npm run dev`, not `vercel dev`, for local work. `vercel dev` does not
-> emulate the WebSocket upgrade path.
+To deploy your own: push to GitHub, import the repo at
+[vercel.com/new](https://vercel.com/new) with framework preset **Other**, then
+add Redis under **Storage → Create Database → Redis (Upstash) → Connect to
+Project** and redeploy. WebSockets need Fluid compute enabled, which is the
+default for recent projects.
 
----
-
-## Deploy to Vercel
-
-### 1. Provision Upstash Redis
-
-Easiest through the Vercel Marketplace, which wires the env var up for you:
-
-```bash
-vercel link
-```
-
-Then in the Vercel dashboard: **Storage → Create Database → Redis (Upstash) →
-Connect to Project**.
-
-Prefer doing it by hand? Create a database at
-[console.upstash.com](https://console.upstash.com), copy the **ioredis**
-connection string (`rediss://default:…@….upstash.io:6379`), and add it:
-
-```bash
-vercel env add REDIS_URL
-```
-
-Add it to Production, Preview, and Development when prompted. If the
-marketplace integration named the variable something else (commonly
-`REDIS_URL` or `KV_URL`), either rename it or set `REDIS_URL` to the same
-value. The server also accepts `UPSTASH_REDIS_URL`.
-
-### 2. Confirm Fluid compute is on
-
-WebSockets require it. It has been the default for projects created since
-23 April 2025; for older projects turn it on under **Settings → Functions →
-Fluid compute**.
-
-### 3. Ship
-
-```bash
-vercel --prod
-```
-
-Verify the deployment is healthy:
+Check it worked:
 
 ```bash
 curl https://your-deployment.vercel.app/healthz
 ```
 
-That returns the instance id, the active bus (`redis` or `local`), and the
-current online count. **If it reports `"bus":"local"` in production, `REDIS_URL`
-did not reach the function** and instances are not talking to each other.
+You want `"bus":"redis"`. If it says `"bus":"local"` the Redis URL never
+reached the function, and users on different instances will not see each other.
 
----
-
-## How it works
-
-### Cross-instance sync
-
-A WebSocket is pinned to one function instance, but a busy room spreads across
-many. Nothing may live in module scope and be trusted, so everything crosses
-Redis:
-
-- **Messages, system logs, typing** are published to the `nullchat:global`
-  Pub/Sub channel. Each instance subscribes and fans out to its own sockets.
-  The sender's own message arrives the same way, so there is no local echo to
-  deduplicate.
-- **Online count** uses a sorted set (`nullchat:presence`) keyed by an opaque
-  connection id with the heartbeat timestamp as score. Every instance refreshes
-  its own members every 15s and evicts anything older than 45s before counting.
-  An instance killed without cleanup ages out instead of inflating the counter
-  forever.
-
-The presence set stores connection ids, never usernames.
-
-### Reconnects
-
-Vercel caps a function at **5 minutes by default**, so every client's socket
-drops roughly that often. That is normal, not an error, and it is handled:
-
-- The client reconnects with exponential backoff (1s → 15s) and re-joins with
-  `resume: true`, which suppresses the join announcement.
-- On disconnect the presence entry is removed immediately, so the counter is
-  always accurate, but the "left the room" line is held for 10 seconds. A
-  reconnect within that window cancels it via a short-lived Redis key, so a
-  duration-cap reconnect produces no join/leave noise at all. Someone who
-  actually leaves is announced once the window closes.
-
-Because the username lives only in a JavaScript variable, a reconnect keeps it
-while a refresh discards it, which is the intended behaviour in both cases.
-
-### One session per device
-
-Two tabs on one device used to mean two users and a doubled online count.
-A tab now claims a [Web Lock](https://developer.mozilla.org/en-US/docs/Web/API/Web_Locks_API)
-named `nullchat-session` and holds it for as long as it is open. A second tab
-finds the lock taken and shows an "Already open" notice instead of connecting,
-so it never opens a socket and never reaches the presence set.
-
-A lock is used rather than a `localStorage` flag for two reasons: the browser
-releases it automatically when the tab closes or crashes, so there is no stale
-claim to expire, and it persists nothing, which keeps the no-storage promise
-intact.
-
-The blocked tab queues for the lock rather than polling, which makes two things
-work by themselves:
-
-- Close the active tab and the waiting one takes over immediately.
-- Press **Use this tab** and it broadcasts on a `BroadcastChannel`; the holder
-  closes its socket, clears its copy of the room, and releases. Locks are
-  granted in request order, so the tab that asked first wins and the two cannot
-  fight over it.
-
-Taking over gives you a **new** handle, because identity lives only in the
-tab's memory. That is the same rule as refreshing the page, applied
-consistently.
-
-**What this does not do:** it is not an identity control. A second browser, a
-private window, or another device each get their own lock and their own user.
-Nothing available to a web page can prevent that. This stops the accidental
-duplicate tab, which is what it is for. If browsers without the Web Locks API
-show up, the check degrades to open rather than locking someone out on a guess.
-
-### Sanitisation
-
-Two independent layers:
-
-- **Backend** strips control characters (including bidi overrides), removes
-  `<` and `>`, collapses whitespace, and caps length. This runs before anything
-  is published, so a hand-rolled WebSocket client that skips the browser
-  entirely still cannot inject markup.
-- **Frontend** builds every node with `textContent`. No user string ever
-  reaches `innerHTML`.
-
-Angle brackets are *removed* rather than entity-escaped, because escaping
-server-side would double-encode against `textContent` and users would read a
-literal `&lt;`. The trade-off is that `a < b` loses its bracket. To allow them,
-drop the `.replace(/[<>]/g, '')` from `sanitizeMessage` in
-[api/server.js](api/server.js). `textContent` rendering keeps it safe.
-
-Also enforced: empty and whitespace-only messages are rejected on both sides,
-usernames are restricted to `[a-zA-Z0-9_-]{2,20}`, messages are capped at 500
-characters, the socket payload limit is 16 KB, and each connection is limited
-to 12 messages per 10 seconds.
-
----
-
-## Tuning
+### Tuning
 
 Constants at the top of [api/server.js](api/server.js):
 
@@ -203,23 +153,20 @@ Constants at the top of [api/server.js](api/server.js):
 | --- | --- | --- |
 | `PRESENCE_TTL_MS` | 45s | Presence entries older than this are evicted |
 | `HEARTBEAT_MS` | 15s | Ping clients, refresh presence |
-| `TYPING_TTL_MS` | 5s | Typing state auto-clears after this |
+| `TYPING_TTL_MS` | 5s | Typing state auto clears after this |
 | `LEAVE_GRACE_MS` | 10s | Window a reconnect has to cancel a leave notice |
-| `RATE_MAX_MESSAGES` | 12 / 10s | Per-connection message rate limit |
-
-To raise the 5-minute connection cap to 30 minutes (Pro/Enterprise, in beta),
-add to `vercel.json`:
-
-```json
-{ "functions": { "api/server.js": { "maxDuration": 1800 } } }
-```
+| `RATE_MAX_MESSAGES` | 12 / 10s | Per connection message rate limit |
 
 ---
 
 ## Deliberate omissions
 
-- **No message history.** A new arrival sees an empty room. Persisting a
-  rolling buffer in Redis would be ~10 lines, but it contradicts the premise.
-- **No username uniqueness.** Two people can hold the same handle at once.
-  Enforcing it would mean a registry of live names in Redis.
-- **No moderation, no private rooms, no reactions.** One global room only.
+- **No message history.** A new arrival sees an empty room. A rolling buffer in
+  Redis would be about ten lines of code, and it would contradict the point.
+- **No unique handles.** Two people can be `quiet_fox_42` at once. Enforcing it
+  would mean keeping a registry of live names.
+- **No private rooms, no direct messages, no reactions.** One room.
+
+---
+
+Built by [kh4n-6829](https://github.com/kh4n-6829).
