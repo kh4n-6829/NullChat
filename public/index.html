@@ -1,0 +1,1180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="dark" />
+<meta name="robots" content="noindex, nofollow" />
+<title>nullchat</title>
+<!-- Square mark, same cursor block as the live indicator. No rounded corners
+     anywhere on this page, favicon included. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230d0d0d'/%3E%3Crect x='9' y='9' width='14' height='14' fill='%2339ff14'/%3E%3C/svg%3E" />
+<style>
+  /* ---------------------------------------------------------------------
+     nullchat design notes
+
+     Palette is the original brief (matte black, matrix green) but the green
+     is RATIONED. --live is the only fully saturated value on the page and it
+     appears in exactly two places: the connection block and the online count.
+     Everything else sits on a desaturated ramp. A wall of #39ff14 has no
+     hierarchy and is genuinely tiring to read, which is the opposite of what
+     a chat log needs.
+
+     Shape lock: one radius for the entire page, and it is zero. Square
+     corners read as a terminal tool; rounded cards read as a template.
+
+     No glows, no blinking cursors, no decorative loops. The only motion left
+     is state feedback: rows entering, and the reconnect pulse.
+     --------------------------------------------------------------------- */
+
+  :root {
+    --bg:         #0d0d0d;
+    --surface:    #141414;
+    --raised:     #1a1a1a;
+
+    --line:       #242424;
+    --line-soft:  #1c1c1c;
+
+    --live:       #39ff14;   /* rationed: connection block + online count */
+    --green:      #7ee787;   /* usernames, active controls */
+    --green-hi:   #b7f5b0;   /* your own name in the log */
+    --green-mid:  #4f9d47;   /* system lines */
+    --green-deep: #2f6b28;   /* borders on active controls */
+    --green-bg:   #13210f;   /* primary button fill */
+
+    /* The bottom of this ramp is set by contrast, not by taste. Timestamps,
+       placeholders and the ghost button all live on --faint, so it has to
+       clear WCAG AA (4.5:1) against --bg rather than fading into it.
+       Measured on #0d0d0d: --faint 4.9:1, --muted 6.0:1, --text-dim 6.9:1. */
+    --text:       #cbcbc6;
+    --text-dim:   #9a9a94;
+    --muted:      #8f8f89;
+    --faint:      #808079;
+
+    --danger:     #ff6b5e;
+    --warn:       #d8a02a;
+
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono",
+            "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; margin: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  button, input { font: inherit; color: inherit; border-radius: 0; }
+
+  ::selection { background: var(--green-deep); color: #eafce7; }
+
+  [hidden] { display: none !important; }
+
+  .shell {
+    height: 100dvh;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 18px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* --------------------------------------------------------------- entry
+     Left-anchored, no card. The container is a single hairline rule, not a
+     floating panel centred in a void. */
+
+  /* Two rows: the form centres itself in the space above, the footer link sits
+     on the floor. Keeps the link well clear of the enter-room button rather
+     than stacking it directly under the call to action. */
+  .entry {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: 1fr auto;
+    animation: fade .3s linear both;
+  }
+
+  .entry-inner {
+    align-self: center;
+    width: 100%;
+    max-width: 46ch;
+    border-left: 1px solid var(--green-deep);
+    padding-left: clamp(16px, 3.5vw, 32px);
+  }
+
+  /* The extra 1px accounts for the rule on .entry-inner, so the footer text
+     and the form text share one left edge. */
+  .entry-foot {
+    padding: 22px 0 22px calc(clamp(16px, 3.5vw, 32px) + 1px);
+  }
+
+  .link {
+    color: var(--faint);
+    font-size: 12px;
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: color .15s linear, border-color .15s linear;
+  }
+
+  .link:hover { color: var(--green); border-bottom-color: var(--green-deep); }
+  .link:focus-visible { outline: 1px solid var(--green); outline-offset: 3px; }
+
+  .entry-title {
+    font-size: clamp(30px, 6.5vw, 44px);
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    color: var(--text);
+    margin: 0 0 16px;
+  }
+
+  .entry-body {
+    color: var(--text-dim);
+    font-size: 13.5px;
+    line-height: 1.75;
+    margin: 0 0 32px;
+    max-width: 40ch;
+  }
+
+  .field-label {
+    display: block;
+    font-size: 11.5px;
+    color: var(--muted);
+    margin-bottom: 9px;
+  }
+
+  .field { display: flex; gap: 8px; }
+
+  .input {
+    flex: 1;
+    min-width: 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    padding: 11px 13px;
+    color: var(--green);
+    outline: none;
+    transition: border-color .15s linear;
+  }
+
+  .input::placeholder { color: var(--faint); }
+  .input:focus { border-color: var(--green-deep); }
+  .input:focus-visible { outline: 1px solid var(--green); outline-offset: -2px; }
+
+  .btn {
+    background: transparent;
+    border: 1px solid var(--line);
+    padding: 11px 16px;
+    color: var(--text-dim);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color .15s linear, border-color .15s linear, background .15s linear;
+  }
+
+  .btn:hover { color: var(--text); border-color: #333; background: var(--surface); }
+  .btn:active { transform: translateY(1px); }
+  .btn:focus-visible { outline: 1px solid var(--green); outline-offset: 2px; }
+
+  .btn-primary {
+    background: var(--green-bg);
+    border-color: var(--green-deep);
+    color: var(--green);
+  }
+
+  .btn-primary:hover {
+    background: #182c13;
+    border-color: #3d8534;
+    color: var(--green-hi);
+  }
+
+  .entry-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-top: 20px;
+  }
+
+  .hint { color: var(--faint); font-size: 11.5px; }
+
+  .entry-error {
+    color: var(--danger);
+    font-size: 12px;
+    margin-top: 12px;
+    min-height: 1em;
+  }
+
+  /* -------------------------------------------------------------- header */
+
+  .head {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 0 13px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .wordmark {
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin: 0;
+  }
+
+  .spacer { flex: 1; }
+
+  .live {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* Square, not a circle. One radius on this page and it is zero, so the
+     status marker reads as a terminal cursor block. */
+  .dot {
+    width: 6px;
+    height: 6px;
+    background: var(--live);
+    flex: none;
+  }
+
+  .dot.reconnecting {
+    background: var(--warn);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+
+  .count {
+    color: var(--live);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .me {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+  }
+
+  .me-name {
+    color: var(--green);
+    max-width: 22ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .btn-ghost {
+    background: none;
+    border: none;
+    padding: 4px 2px;
+    color: var(--faint);
+    cursor: pointer;
+    font-size: 11.5px;
+    border-bottom: 1px solid transparent;
+    transition: color .15s linear, border-color .15s linear;
+  }
+
+  .btn-ghost:hover { color: var(--text-dim); border-bottom-color: var(--line); }
+  .btn-ghost:focus-visible { outline: 1px solid var(--green); outline-offset: 2px; }
+
+  /* ----------------------------------------------------------------- log */
+
+  .log-wrap { position: relative; flex: 1; min-height: 0; }
+
+  .log {
+    height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 18px 0 10px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+  }
+
+  .log::-webkit-scrollbar { width: 10px; }
+  .log::-webkit-scrollbar-track { background: transparent; }
+  .log::-webkit-scrollbar-thumb {
+    background: var(--line);
+    border: 3px solid var(--bg);
+  }
+  .log::-webkit-scrollbar-thumb:hover { background: #303030; }
+
+  .row {
+    padding: 3px 0;
+    word-break: break-word;
+    animation: rise .14s linear both;
+  }
+
+  .time {
+    color: var(--faint);
+    margin-right: 10px;
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .name { color: var(--green); font-weight: 600; }
+  .row.own .name { color: var(--green-hi); }
+
+  .sep { color: var(--faint); margin-right: 8px; }
+
+  .row.sys { color: var(--green-mid); font-size: 12.5px; }
+  .row.err { color: var(--danger); font-size: 12.5px; }
+
+  /* Empty state. A blank void tells a new arrival nothing; this explains why
+     the room looks empty, which is a product fact worth stating. */
+  /* Vertically centred rather than pinned to the top, so it never collides
+     with the join/leave lines that sit above it. */
+  .empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    max-width: 44ch;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.75;
+    pointer-events: none;
+  }
+
+  .empty b {
+    display: block;
+    color: var(--text-dim);
+    font-weight: 600;
+    margin-bottom: 7px;
+  }
+
+  .pill {
+    position: absolute;
+    left: 50%;
+    bottom: 12px;
+    transform: translateX(-50%);
+    background: var(--raised);
+    border: 1px solid var(--green-deep);
+    color: var(--green);
+    padding: 7px 15px;
+    font-size: 12px;
+    cursor: pointer;
+    animation: rise .14s linear both;
+  }
+
+  .pill:hover { background: #1f2c1c; }
+  .pill:focus-visible { outline: 1px solid var(--green); outline-offset: 2px; }
+
+  /* -------------------------------------------------------------- footer */
+
+  .typing {
+    height: 22px;
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .typing .who { color: var(--green-mid); }
+
+  .composer { display: flex; gap: 8px; padding: 4px 0 18px; }
+
+  /* --------------------------------------------------------------- modal
+     The one place a container is justified: it is an overlay, so elevation
+     is carrying real hierarchy rather than decorating a form. */
+
+  .modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(6, 6, 6, 0.82);
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    z-index: 10;
+    animation: fade .15s linear both;
+  }
+
+  .modal-panel {
+    width: 100%;
+    max-width: 400px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    padding: 26px 24px 22px;
+  }
+
+  .modal-title {
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--text);
+    margin: 0 0 10px;
+  }
+
+  .modal-body {
+    color: var(--text-dim);
+    font-size: 12.5px;
+    line-height: 1.7;
+    margin: 0 0 22px;
+  }
+
+  /* -------------------------------------------------------------- motion */
+
+  @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+  @keyframes rise { from { opacity: 0; transform: translateY(3px) } to { opacity: 1; transform: none } }
+  @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .4 } }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+
+  @media (max-width: 560px) {
+    body { font-size: 13.5px; }
+    .shell { padding: 0 13px; }
+    .entry-inner { padding-left: 15px; }
+    /* 15px + the 1px rule, so this keeps sharing an edge with the form text */
+    .entry-foot { padding-left: 16px; }
+    .head { gap: 11px; padding-top: 14px; }
+    .me-name { max-width: 12ch; }
+    .live .word { display: none; }
+    .empty { font-size: 12.5px; }
+    /* 16px keeps iOS Safari from zooming the viewport on focus */
+    .input { font-size: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ------------------------------------------------------------- entry -->
+  <section class="entry" id="entry">
+    <div class="entry-inner">
+      <h1 class="entry-title">nullchat</h1>
+      <p class="entry-body">
+        One room, open to anyone. No accounts and no history. Your handle
+        lasts until you close the tab, then it is gone.
+      </p>
+
+      <label class="field-label" for="nameInput">Handle</label>
+      <div class="field">
+        <input
+          class="input"
+          id="nameInput"
+          type="text"
+          maxlength="20"
+          autocomplete="off"
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck="false"
+          placeholder="quiet_fox_42"
+        />
+        <button class="btn" id="shuffleBtn" type="button" title="Generate another">shuffle</button>
+      </div>
+
+      <div class="entry-error" id="entryError"></div>
+
+      <div class="entry-actions">
+        <span class="hint" id="entryStatus">connecting</span>
+        <button class="btn btn-primary" id="enterBtn" type="button">Enter room</button>
+      </div>
+    </div>
+
+    <footer class="entry-foot">
+      <a
+        class="link"
+        href="https://github.com/kh4n-6829"
+        target="_blank"
+        rel="noopener noreferrer"
+      >github.com/kh4n-6829</a>
+    </footer>
+  </section>
+
+  <!-- --------------------------------------------------- duplicate tab -->
+  <section class="entry" id="duplicate" hidden>
+    <div class="entry-inner">
+      <h1 class="entry-title">Already open</h1>
+      <p class="entry-body">
+        nullchat is running in another tab on this device. One tab at a time
+        keeps the online count honest.
+      </p>
+      <div class="entry-actions">
+        <button class="btn btn-primary" id="takeOverBtn" type="button">Use this tab</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- -------------------------------------------------------------- chat -->
+  <header class="head" id="head" hidden>
+    <h1 class="wordmark">nullchat</h1>
+    <div class="live">
+      <span class="dot" id="statusDot"></span>
+      <span class="count" id="onlineCount">0</span>
+      <span class="word">online</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="me">
+      <span class="me-name" id="meName"></span>
+      <button class="btn-ghost" id="changeBtn" type="button">change</button>
+    </div>
+  </header>
+
+  <div class="log-wrap" id="logWrap" hidden>
+    <div class="log" id="log" role="log" aria-live="polite" aria-label="Chat messages"></div>
+    <div class="empty" id="emptyState">
+      <b>Nothing here yet.</b>
+      Messages are never stored, so anything sent before you arrived is gone.
+      Say something and whoever is online will see it.
+    </div>
+  </div>
+
+  <div class="typing" id="typing" hidden></div>
+
+  <div class="composer" id="composer" hidden>
+    <input
+      class="input"
+      id="msgInput"
+      type="text"
+      maxlength="500"
+      autocomplete="off"
+      autocapitalize="sentences"
+      autocorrect="off"
+      placeholder="Type a message"
+      aria-label="Message"
+    />
+    <button class="btn btn-primary" id="sendBtn" type="button">Send</button>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // -------------------------------------------------------------- constants
+
+  var WS_URL = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/api/ws';
+
+  var MAX_MESSAGE_LEN = 500;
+  var MAX_USERNAME_LEN = 20;
+  var MIN_USERNAME_LEN = 2;
+  var STICK_THRESHOLD = 90;   // px from bottom that still counts as "at bottom"
+  var MAX_ROWS = 400;         // cap the DOM; this room has no history anyway
+  var TYPING_IDLE_MS = 1500;
+  var MAX_RECONNECT_MS = 15000;
+
+  var ADJECTIVES = ['quiet','hollow','amber','static','velvet','copper','silent','faded',
+                    'neon','lunar','drifting','glass','ashen','violet','hidden','slow'];
+  var NOUNS = ['fox','ember','signal','moth','harbor','cipher','wolf','echo',
+               'orbit','ghost','kite','raven','vector','lantern','reef','nomad'];
+
+  // ------------------------------------------------------------------ state
+
+  // Deliberately in-memory only. No storage of any kind, so a refresh or a
+  // closed tab wipes the identity completely, which is the whole point.
+  var username = null;
+  var joined = false;
+  var ws = null;
+  var reconnectDelay = 1000;
+  var everConnected = false;
+  var sessionActive = false; // true only while this tab holds the device lock
+
+  var typingActive = false;
+  var typingTimer = null;
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  var entry = $('entry'), nameInput = $('nameInput'), shuffleBtn = $('shuffleBtn'),
+      enterBtn = $('enterBtn'), entryStatus = $('entryStatus'), entryError = $('entryError'),
+      head = $('head'), statusDot = $('statusDot'), onlineCount = $('onlineCount'),
+      meName = $('meName'), changeBtn = $('changeBtn'),
+      logWrap = $('logWrap'), log = $('log'), typingEl = $('typing'),
+      emptyState = $('emptyState'), composer = $('composer'),
+      msgInput = $('msgInput'), sendBtn = $('sendBtn'),
+      duplicate = $('duplicate'), takeOverBtn = $('takeOverBtn');
+
+  var pill = null;
+
+  // ------------------------------------------------------------- utilities
+
+  /**
+   * Mirrors the server's sanitiser. The server is the real gate. This just
+   * means what you see in the box is what everyone else will see.
+   */
+  function cleanMessage(value) {
+    return String(value)
+      .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, '')
+      .replace(/[<>]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, MAX_MESSAGE_LEN);
+  }
+
+  function cleanUsername(value) {
+    return String(value)
+      .replace(/[^a-zA-Z0-9_-]/g, '')
+      .slice(0, MAX_USERNAME_LEN);
+  }
+
+  function randomUsername() {
+    var a = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
+    var n = NOUNS[Math.floor(Math.random() * NOUNS.length)];
+    return a + '_' + n + '_' + (Math.floor(Math.random() * 90) + 10);
+  }
+
+  function formatTime(ts) {
+    return new Date(ts || Date.now())
+      .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })
+      .replace(/\u202F/g, ' ')  // Chrome separates the meridiem with U+202F
+      .replace(/\b([ap])\.?m\.?\b/i, function (_match, letter) {
+        return letter.toUpperCase() + 'M';
+      });
+  }
+
+  /** Every element is built with textContent, so user strings never touch HTML. */
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function sendJSON(payload) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(payload));
+      return true;
+    }
+    return false;
+  }
+
+  // -------------------------------------------------------------- scrolling
+
+  function isAtBottom() {
+    return log.scrollHeight - log.scrollTop - log.clientHeight <= STICK_THRESHOLD;
+  }
+
+  function scrollToBottom() {
+    log.scrollTop = log.scrollHeight;
+    removePill();
+  }
+
+  function showPill() {
+    if (pill) return;
+    pill = el('button', 'pill', 'New messages below');
+    pill.type = 'button';
+    pill.addEventListener('click', scrollToBottom);
+    logWrap.appendChild(pill);
+  }
+
+  function removePill() {
+    if (!pill) return;
+    pill.remove();
+    pill = null;
+  }
+
+  /**
+   * Append a row, holding the scroll position if the reader has deliberately
+   * scrolled up. Snapping them back mid-sentence is the thing that makes chat
+   * UIs infuriating, so we only auto-scroll when they were already at the end.
+   */
+  function append(row, opts) {
+    var stick = isAtBottom();
+    log.appendChild(row);
+
+    while (log.childElementCount > MAX_ROWS) {
+      log.removeChild(log.firstElementChild);
+    }
+
+    // Keyed on actual conversation, not system lines. Your own "joined the
+    // room" arrives instantly, so counting every row would mean the empty
+    // state was never once seen.
+    emptyState.hidden = log.querySelector('.msg') !== null;
+
+    if (stick) {
+      scrollToBottom();
+    } else if (opts && opts.notify) {
+      showPill();
+    }
+  }
+
+  log.addEventListener('scroll', function () {
+    if (isAtBottom()) removePill();
+  });
+
+  // -------------------------------------------------------------- rendering
+
+  function addMessage(data) {
+    var own = data.user === username;
+    var row = el('div', own ? 'row msg own' : 'row msg');
+    row.appendChild(el('span', 'time', '[' + formatTime(data.ts) + ']'));
+    row.appendChild(el('span', 'name', data.user));
+    row.appendChild(el('span', 'sep', ':'));
+    row.appendChild(el('span', 'body', data.text));
+    append(row, { notify: true });
+  }
+
+  function addSystem(text, ts) {
+    var row = el('div', 'row sys');
+    row.appendChild(el('span', 'time', '[' + formatTime(ts) + ']'));
+    row.appendChild(el('span', 'body', text));
+    append(row, { notify: false });
+  }
+
+  function addError(text) {
+    var row = el('div', 'row err');
+    row.appendChild(el('span', 'time', '[' + formatTime() + ']'));
+    row.appendChild(el('span', 'body', text));
+    append(row, { notify: false });
+  }
+
+  function renderTyping(users) {
+    if (!users || users.length === 0) {
+      typingEl.textContent = '';
+      return;
+    }
+
+    var label;
+    if (users.length === 1) label = users[0] + ' is typing';
+    else if (users.length === 2) label = users[0] + ' and ' + users[1] + ' are typing';
+    else label = users[0] + ', ' + users[1] + ' and ' + (users.length - 2) + ' others are typing';
+
+    // The line appearing at all is the signal. Three animated dots on top of
+    // that is decoration, and this page does not run decorative loops.
+    typingEl.textContent = '';
+    typingEl.appendChild(el('span', 'who', label));
+  }
+
+  function setStatus(state) {
+    if (state === 'online') {
+      statusDot.classList.remove('reconnecting');
+      statusDot.title = 'connected';
+    } else {
+      statusDot.classList.add('reconnecting');
+      statusDot.title = 'reconnecting';
+    }
+  }
+
+  // ------------------------------------------------------------- connection
+
+  function connect() {
+    if (!sessionActive) return; // this tab handed the session to another one
+
+    try {
+      ws = new WebSocket(WS_URL);
+    } catch (err) {
+      scheduleReconnect();
+      return;
+    }
+
+    ws.addEventListener('open', function () {
+      reconnectDelay = 1000;
+      setStatus('online');
+      entryStatus.textContent = 'connected';
+
+      // A Vercel function caps a socket at ~5 minutes, so reconnects are
+      // routine rather than exceptional. Re-join silently to avoid spamming
+      // the room with join/leave noise every time that timer fires.
+      if (username && joined) {
+        sendJSON({ t: 'join', username: username, resume: everConnected });
+      }
+      everConnected = true;
+    });
+
+    ws.addEventListener('message', function (event) {
+      var data;
+      try {
+        data = JSON.parse(event.data);
+      } catch (err) {
+        return;
+      }
+      handleEvent(data);
+    });
+
+    ws.addEventListener('close', function () {
+      setStatus('offline');
+      entryStatus.textContent = 'reconnecting';
+      renderTyping([]);
+      scheduleReconnect();
+    });
+
+    ws.addEventListener('error', function () {
+      // 'close' always follows, and that is where reconnection is handled.
+    });
+  }
+
+  function scheduleReconnect() {
+    if (!sessionActive) return;
+    setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_MS);
+  }
+
+  function handleEvent(data) {
+    switch (data.t) {
+      case 'hello':
+        onlineCount.textContent = data.online || 0;
+        break;
+
+      case 'welcome':
+        username = data.username;
+        meName.textContent = data.username;
+        if (!joined) enterRoom();
+        break;
+
+      case 'msg':
+        addMessage(data);
+        break;
+
+      case 'sys':
+        addSystem(data.text, data.ts);
+        break;
+
+      case 'presence':
+        onlineCount.textContent = data.count;
+        break;
+
+      case 'typing':
+        renderTyping(data.users);
+        break;
+
+      case 'error':
+        if (joined) addError(data.text);
+        else showEntryError(data.text);
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  // ------------------------------------------------------------ entry flow
+
+  function showEntryError(text) {
+    entryError.textContent = text;
+  }
+
+  function submitEntry() {
+    var candidate = cleanUsername(nameInput.value);
+
+    if (candidate.length < MIN_USERNAME_LEN) {
+      showEntryError('Use ' + MIN_USERNAME_LEN + '-' + MAX_USERNAME_LEN +
+                     ' characters: letters, numbers, _ or -');
+      nameInput.focus();
+      return;
+    }
+
+    showEntryError('');
+    username = candidate;
+
+    if (!sendJSON({ t: 'join', username: candidate })) {
+      showEntryError('Still connecting. Try again in a moment.');
+      return;
+    }
+
+    // The room opens on the server's `welcome`, so the header never shows a
+    // name the server has not actually accepted.
+  }
+
+  function enterRoom() {
+    joined = true;
+    entry.hidden = true;
+    head.hidden = false;
+    logWrap.hidden = false;
+    typingEl.hidden = false;
+    composer.hidden = false;
+    msgInput.focus();
+    scrollToBottom();
+  }
+
+  // ----------------------------------------------------------- change name
+
+  function openNameChange() {
+    var overlay = el('div', 'modal');
+    var card = el('div', 'modal-panel');
+
+    card.appendChild(el('h2', 'modal-title', 'New handle'));
+    card.appendChild(el('p', 'modal-body', 'Everyone in the room sees the change.'));
+
+    var field = el('div', 'field');
+    var input = el('input', 'input');
+    input.type = 'text';
+    input.maxLength = MAX_USERNAME_LEN;
+    input.value = username || '';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+
+    var shuffle = el('button', 'btn', 'shuffle');
+    shuffle.type = 'button';
+    shuffle.addEventListener('click', function () {
+      input.value = randomUsername();
+      input.focus();
+    });
+
+    field.appendChild(input);
+    field.appendChild(shuffle);
+    card.appendChild(field);
+
+    var error = el('div', 'entry-error');
+    card.appendChild(error);
+
+    var actions = el('div', 'entry-actions');
+    var cancel = el('button', 'btn', 'Cancel');
+    cancel.type = 'button';
+    var save = el('button', 'btn btn-primary', 'Save');
+    save.type = 'button';
+    actions.appendChild(cancel);
+    actions.appendChild(save);
+    card.appendChild(actions);
+
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    input.focus();
+    input.select();
+
+    function close() {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      msgInput.focus();
+    }
+
+    function commit() {
+      var next = cleanUsername(input.value);
+      if (next.length < MIN_USERNAME_LEN) {
+        error.textContent = 'Use ' + MIN_USERNAME_LEN + '-' + MAX_USERNAME_LEN +
+                            ' characters: letters, numbers, _ or -';
+        return;
+      }
+      sendJSON({ t: 'nick', username: next });
+      close();
+    }
+
+    function onKey(event) {
+      if (event.key === 'Escape') close();
+    }
+
+    cancel.addEventListener('click', close);
+    save.addEventListener('click', commit);
+    overlay.addEventListener('click', function (event) {
+      if (event.target === overlay) close();
+    });
+    input.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') { event.preventDefault(); commit(); }
+    });
+    document.addEventListener('keydown', onKey);
+  }
+
+  // ---------------------------------------------------------------- typing
+
+  function pingTyping() {
+    if (!joined) return;
+    typingActive = true;
+    sendJSON({ t: 'typing', state: true });
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(stopTyping, TYPING_IDLE_MS);
+  }
+
+  function stopTyping() {
+    clearTimeout(typingTimer);
+    if (!typingActive) return;
+    typingActive = false;
+    sendJSON({ t: 'typing', state: false });
+  }
+
+  // --------------------------------------------------------------- sending
+
+  function submitMessage() {
+    var text = cleanMessage(msgInput.value);
+    if (!text) {                 // empty / whitespace-only never leaves the tab
+      msgInput.value = '';
+      return;
+    }
+
+    stopTyping();
+    sendJSON({ t: 'msg', text: text });
+    msgInput.value = '';
+    scrollToBottom();
+  }
+
+  // ---------------------------------------------------------------- wiring
+
+  shuffleBtn.addEventListener('click', function () {
+    nameInput.value = randomUsername();
+    showEntryError('');
+    nameInput.focus();
+  });
+
+  enterBtn.addEventListener('click', submitEntry);
+
+  nameInput.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter') { event.preventDefault(); submitEntry(); }
+  });
+
+  nameInput.addEventListener('input', function () {
+    if (entryError.textContent) showEntryError('');
+  });
+
+  changeBtn.addEventListener('click', openNameChange);
+
+  sendBtn.addEventListener('click', submitMessage);
+
+  msgInput.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter') { event.preventDefault(); submitMessage(); }
+  });
+
+  msgInput.addEventListener('input', function () {
+    if (msgInput.value.trim()) pingTyping();
+    else stopTyping();
+  });
+
+  msgInput.addEventListener('blur', stopTyping);
+
+  // A best-effort courtesy so the room is not left with a ghost typing
+  // indicator; the server's TTL sweep covers the cases this misses.
+  window.addEventListener('pagehide', stopTyping);
+
+  // ------------------------------------------------ one session per device
+  //
+  // Held with a Web Lock rather than a localStorage flag, for two reasons:
+  // the browser releases it automatically when the tab closes or crashes, so
+  // there is no stale claim to expire, and it stores nothing, which keeps the
+  // no-persistence promise intact.
+  //
+  // Scope, stated honestly: this stops the accidental second tab. It is not
+  // an identity control. A second browser, a private window, or another
+  // device each get their own lock and their own user, and nothing here can
+  // change that from inside a web page.
+
+  var SESSION_LOCK = 'nullchat-session';
+  var channel = ('BroadcastChannel' in window)
+    ? new BroadcastChannel(SESSION_LOCK)
+    : null;
+  var releaseLock = null;
+  var waitAbort = null;
+
+  /** Returning a promise that never settles is what holds the lock open. It
+   *  resolves only when this tab hands the session to another one. */
+  function holdLock() {
+    startSession();
+    return new Promise(function (resolve) { releaseLock = resolve; });
+  }
+
+  /** Queue for the lock. This resolves the instant the holder lets go, so a
+   *  blocked tab recovers on its own when the other tab is simply closed. */
+  function waitForLock() {
+    waitAbort = new AbortController();
+    navigator.locks
+      .request(SESSION_LOCK, { signal: waitAbort.signal }, function () {
+        waitAbort = null;
+        return holdLock();
+      })
+      .catch(function () { /* aborted, or the tab is going away */ });
+  }
+
+  function cancelWait() {
+    if (!waitAbort) return;
+    waitAbort.abort();
+    waitAbort = null;
+  }
+
+  function claimSession() {
+    // Without Web Locks there is nothing reliable to coordinate through, so
+    // open rather than lock someone out on a guess.
+    if (!navigator.locks) {
+      startSession();
+      return;
+    }
+    navigator.locks.request(SESSION_LOCK, { ifAvailable: true }, function (lock) {
+      if (lock) return holdLock();
+      showDuplicate();
+      waitForLock();
+    });
+  }
+
+  function startSession() {
+    sessionActive = true;
+    cancelWait();
+    duplicate.hidden = true;
+    entry.hidden = false;
+    connect();
+  }
+
+  function showDuplicate() {
+    sessionActive = false;
+    entry.hidden = true;
+    head.hidden = true;
+    logWrap.hidden = true;
+    typingEl.hidden = true;
+    composer.hidden = true;
+    duplicate.hidden = false;
+  }
+
+  /** Another tab asked for the session. Drop ours so its socket can close. */
+  function handOff() {
+    sessionActive = false;
+    joined = false;
+    username = null;
+    stopTyping();
+    if (ws) {
+      try { ws.close(); } catch (err) { /* already gone */ }
+      ws = null;
+    }
+    // Wipe the room out of this tab. If it ever takes the session back it
+    // starts clean, exactly as a fresh visit would.
+    log.textContent = '';
+    emptyState.hidden = false;
+    meName.textContent = '';
+    renderTyping([]);
+    removePill();
+
+    showDuplicate();
+    if (releaseLock) {
+      releaseLock();
+      releaseLock = null;
+    }
+
+    // Re-queue so that closing the tab which just took over hands the session
+    // back here instead of stranding this tab on the notice. Safe against
+    // grabbing it straight back: locks are granted in request order, and the
+    // tab taking over queued before this request was made.
+    if (navigator.locks) waitForLock();
+  }
+
+  function takeOver() {
+    if (!navigator.locks) {
+      startSession();
+      return;
+    }
+    // Ask the holder to stand down, then queue. No polling: the queued
+    // request resolves the moment it releases.
+    cancelWait();
+    if (channel) channel.postMessage({ t: 'takeover' });
+    waitForLock();
+  }
+
+  if (channel) {
+    channel.addEventListener('message', function (event) {
+      if (!event.data || event.data.t !== 'takeover') return;
+      if (sessionActive) handOff();
+    });
+  } else {
+    // Nothing to signal the other tab with, so the button cannot do anything.
+    takeOverBtn.hidden = true;
+  }
+
+  takeOverBtn.addEventListener('click', takeOver);
+
+  // -------------------------------------------------------------- start up
+
+  nameInput.value = randomUsername();
+  claimSession();
+})();
+</script>
+</body>
+</html>

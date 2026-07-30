@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "nullchat",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["/Users/ryan/Downloads/nullchat beta/api/server.js"],
+      "port": 3000
+    }
+  ]
+}

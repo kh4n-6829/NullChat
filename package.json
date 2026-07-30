@@ -1,0 +1,19 @@
+{
+  "name": "nullchat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Anonymous, ephemeral global chatroom. No accounts, no logs, no memory.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node api/server.js",
+    "start": "node api/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ioredis": "^5.4.2",
+    "ws": "^8.18.0"
+  }
+}
