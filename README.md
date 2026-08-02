@@ -4,7 +4,7 @@ An anonymous chatroom that forgets you. One room, open to anyone, no accounts,
 no history. You get a throwaway handle when you arrive and it stops existing
 when you close the tab.
 
-**Live at [nullchat-ten.vercel.app](https://nullchat-ten.vercel.app)**
+**Live at [nullch4t.](https://nullch4t.vercel.app)**
 
 ![The nullchat room](docs/chat.png)
 
@@ -111,61 +111,6 @@ with `textContent`, so no user string ever reaches `innerHTML`. Doing it server
 side too means a hand written client that skips the browser entirely still
 cannot inject markup. Messages are capped at 500 characters and each connection
 is limited to 12 messages per 10 seconds.
-
----
-
-## Run it yourself
-
-```bash
-npm install
-```
-
-```bash
-npm run dev
-```
-
-Then open <http://localhost:3000>.
-
-Without a `REDIS_URL` it starts in single instance mode, using an in process
-event bus in place of Redis so it runs with zero setup. Everything works, but
-only within one process. Fine for local development, wrong in production.
-
-To deploy your own: push to GitHub, import the repo at
-[vercel.com/new](https://vercel.com/new) with framework preset **Other**, then
-add Redis under **Storage → Create Database → Redis (Upstash) → Connect to
-Project** and redeploy. WebSockets need Fluid compute enabled, which is the
-default for recent projects.
-
-Check it worked:
-
-```bash
-curl https://your-deployment.vercel.app/healthz
-```
-
-You want `"bus":"redis"`. If it says `"bus":"local"` the Redis URL never
-reached the function, and users on different instances will not see each other.
-
-### Tuning
-
-Constants at the top of [api/server.js](api/server.js):
-
-| Constant | Default | Meaning |
-| --- | --- | --- |
-| `PRESENCE_TTL_MS` | 45s | Presence entries older than this are evicted |
-| `HEARTBEAT_MS` | 15s | Ping clients, refresh presence |
-| `TYPING_TTL_MS` | 5s | Typing state auto clears after this |
-| `LEAVE_GRACE_MS` | 10s | Window a reconnect has to cancel a leave notice |
-| `RATE_MAX_MESSAGES` | 12 / 10s | Per connection message rate limit |
-
----
-
-## Deliberate omissions
-
-- **No message history.** A new arrival sees an empty room. A rolling buffer in
-  Redis would be about ten lines of code, and it would contradict the point.
-- **No unique handles.** Two people can be `quiet_fox_42` at once. Enforcing it
-  would mean keeping a registry of live names.
-- **No private rooms, no direct messages, no reactions.** One room.
 
 ---
 
